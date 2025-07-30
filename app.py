@@ -158,7 +158,8 @@ def calculate_aspects_dict(celestial_bodies):
 
 # --- 描画関数 ---
 def create_horoscope_chart(celestial_bodies, cusps, ascmc):
-    fig, ax = plt.subplots(figsize=(10, 10), subplot_kw={'projection': 'polar'})
+    # チャートサイズを小さくする
+    fig, ax = plt.subplots(figsize=(8, 8), subplot_kw={'projection': 'polar'})
     ax.set_theta_zero_location('E')
     ax.set_theta_direction(1)
     ax.set_rlim(0, 10)
@@ -196,7 +197,7 @@ def create_horoscope_chart(celestial_bodies, cusps, ascmc):
         ax.text(mid_angle_rad, radius_house_num, str(i + 1), ha='center', va='center', fontsize=12, color='gray', zorder=2)
 
     # 3. 天体
-    radius_planet_base, radius_step = 7.8, 1.2 # ずらす距離を大きくする
+    radius_planet_base, radius_step = 7.8, 1.2
     planets_to_plot = {name: data for name, data in celestial_bodies.items() if name not in SENSITIVE_POINTS}
     sorted_planets = sorted(planets_to_plot.items(), key=lambda item: apply_rotation(item[1]['pos']))
     plot_info = {}
@@ -206,7 +207,7 @@ def create_horoscope_chart(celestial_bodies, cusps, ascmc):
         angle_deg = apply_rotation(data['pos'])
         angle_diff = (angle_deg - last_angle_deg + 360) % 360
         current_radius = radius_planet_base
-        if angle_diff < 16: # 重なり判定の角度を広げる
+        if angle_diff < 16:
             if last_radius == radius_planet_base:
                 current_radius = radius_planet_base - radius_step
             else:
@@ -246,7 +247,8 @@ if is_ready:
         with st.spinner("ホロスコープを計算中..."):
             celestial_bodies, cusps, ascmc = calculate_celestial_data(dt_utc, lat, lon)
         if celestial_bodies and cusps:
-            col1, col2 = st.columns([2, 1])
+            # レイアウト比率を調整
+            col1, col2 = st.columns([3, 2])
             with col1:
                 st.subheader("ホロスコープチャート")
                 with st.spinner("チャートを描画中..."):
@@ -275,7 +277,6 @@ if is_ready:
                     columns=["天体/感受点", "サイン", "度数", "逆行", "ハウス"]
                 )
                 
-                # DataFrameを中央揃えで表示するためのHTML/CSS
                 st.markdown(
                     f"<style>th, td {{text-align: center !important;}}</style>{df.to_html(index=False)}",
                     unsafe_allow_html=True
