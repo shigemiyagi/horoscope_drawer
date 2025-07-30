@@ -196,7 +196,7 @@ def create_horoscope_chart(celestial_bodies, cusps, ascmc):
         ax.text(mid_angle_rad, radius_house_num, str(i + 1), ha='center', va='center', fontsize=12, color='gray', zorder=2)
 
     # 3. 天体
-    radius_planet_base, radius_step = 7.8, 0.9
+    radius_planet_base, radius_step = 7.8, 1.2 # ずらす距離を大きくする
     planets_to_plot = {name: data for name, data in celestial_bodies.items() if name not in SENSITIVE_POINTS}
     sorted_planets = sorted(planets_to_plot.items(), key=lambda item: apply_rotation(item[1]['pos']))
     plot_info = {}
@@ -206,7 +206,7 @@ def create_horoscope_chart(celestial_bodies, cusps, ascmc):
         angle_deg = apply_rotation(data['pos'])
         angle_diff = (angle_deg - last_angle_deg + 360) % 360
         current_radius = radius_planet_base
-        if angle_diff < 15: # 重なり判定の角度を広げる
+        if angle_diff < 16: # 重なり判定の角度を広げる
             if last_radius == radius_planet_base:
                 current_radius = radius_planet_base - radius_step
             else:
@@ -260,7 +260,6 @@ if is_ready:
                     retro = "R" if data.get('is_retro') else ""
                     house = get_house_number(data['pos'], cusps) if cusps else "-"
                     
-                    # ASC/MCの重複表記を修正
                     name_str = name if name in ["ASC", "MC"] else f"{PLANET_SYMBOLS.get(name, '')} {name}"
                     
                     planet_data.append([
@@ -276,11 +275,10 @@ if is_ready:
                     columns=["天体/感受点", "サイン", "度数", "逆行", "ハウス"]
                 )
                 
-                # DataFrameを中央揃えで表示
-                st.dataframe(
-                    df.style.set_properties(**{'text-align': 'center'}),
-                    hide_index=True,
-                    use_container_width=True
+                # DataFrameを中央揃えで表示するためのHTML/CSS
+                st.markdown(
+                    f"<style>th, td {{text-align: center !important;}}</style>{df.to_html(index=False)}",
+                    unsafe_allow_html=True
                 )
 
                 st.subheader("アスペクトリスト")
