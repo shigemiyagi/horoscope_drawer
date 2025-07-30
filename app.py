@@ -47,7 +47,7 @@ PLANET_NAMES = {
 PLANET_SYMBOLS = {
     "太陽": "☉", "月": "☽", "水星": "☿", "金星": "♀", "火星": "♂", "木星": "♃", "土星": "♄",
     "天王星": "♅", "海王星": "♆", "冥王星": "♇", "キロン": "⚷", "リリス": "⚸",
-    "ドラゴンヘッド": "☊", "ドラゴンテイル": "☋"
+    "ドラゴンヘッド": "☊", "ドラゴンテイル": "☋", "ASC": "Asc", "MC": "MC"
 }
 PLANET_COLORS = {
     "太陽": "gold", "月": "silver", "水星": "lightgrey", "金星": "hotpink", "火星": "red",
@@ -170,13 +170,8 @@ def calculate_celestial_data(dt_utc, lat, lon):
 def calculate_aspects_list(celestial_bodies):
     """天体間のアスペクトを計算してリストで返す"""
     aspect_list = []
-    # 感受点も含めたリストを作成
     all_points = list(celestial_bodies.keys())
     
-    # PoFやキロン、リリス、ノード軸とのアスペクトは除外することが多いが、ここでは全て計算
-    # all_points = [p for p in all_points if p not in ["キロン", "リリス", "ドラゴンヘッド", "ドラゴンテイル"]]
-
-
     for i in range(len(all_points)):
         for j in range(i + 1, len(all_points)):
             p1_name = all_points[i]
@@ -185,17 +180,14 @@ def calculate_aspects_list(celestial_bodies):
             p1 = celestial_bodies[p1_name]
             p2 = celestial_bodies[p2_name]
 
-            # 角度差を計算
             angle_diff = abs(p1['pos'] - p2['pos'])
             if angle_diff > 180:
                 angle_diff = 360 - angle_diff
 
-            # 各アスペクトをチェック
             for aspect_name, params in ASPECTS.items():
                 orb = params['orb']
-                # 光度（太陽・月）が絡む場合はオーブを広く取る
                 if p1.get('id') in LUMINARIES or p2.get('id') in LUMINARIES:
-                    orb += 2 # 例として2度加算
+                    orb += 2
 
                 current_orb = abs(angle_diff - params['angle'])
                 if current_orb < orb:
@@ -212,8 +204,8 @@ def calculate_aspects_list(celestial_bodies):
 def create_horoscope_chart(celestial_bodies, cusps, ascmc):
     """Matplotlibでホロスコープチャートを描画する"""
     fig, ax = plt.subplots(figsize=(10, 10), subplot_kw={'projection': 'polar'})
-    ax.set_theta_zero_location('W') # 0度を西(左)に設定 (牡羊座0度が左端)
-    ax.set_theta_direction(-1) # 時計回り
+    ax.set_theta_zero_location('W')
+    ax.set_theta_direction(-1)
     ax.set_rlim(0, 10)
     ax.set_yticklabels([])
     ax.set_xticklabels([])
@@ -226,45 +218,29 @@ def create_horoscope_chart(celestial_bodies, cusps, ascmc):
         start_angle = np.deg2rad(i * DEGREES_PER_SIGN)
         end_angle = np.deg2rad((i + 1) * DEGREES_PER_SIGN)
         mid_angle = np.deg2rad((i + 0.5) * DEGREES_PER_SIGN)
-
-        # サインの背景色
         color = "aliceblue" if i % 2 == 0 else "white"
         ax.fill_between(np.linspace(start_angle, end_angle, 100), radius_sign - 1.5, radius_sign, color=color, zorder=0)
-
-        # サインの境界線
         ax.plot([start_angle, start_angle], [radius_sign - 1.5, radius_sign], color='lightgray', linewidth=1)
-
-        # サインのシンボルと名前
         ax.text(mid_angle, radius_sign - 0.7, SIGN_SYMBOLS[i], ha='center', va='center', fontsize=20, zorder=2)
-        if jp_font_path: # 日本語フォントがある場合のみ名前を表示
+        if jp_font_path:
              ax.text(mid_angle, radius_sign - 2.2, SIGN_NAMES[i], ha='center', va='center', fontsize=9, rotation=np.rad2deg(mid_angle)+90, zorder=2)
-
-    # 外側の円
     ax.plot(np.linspace(0, 2 * np.pi, 100), [radius_sign] * 100, color='gray', linewidth=1)
 
     # --- 2. ハウスのカスプを描画 ---
     radius_house_num = 6.5
     if cusps is not None and ascmc is not None:
-        # ASC-DSCライン (地平線)
         asc_angle = np.deg2rad(ascmc[0])
         ax.plot([asc_angle, asc_angle + np.pi], [0, radius_sign-1.5], color='black', linewidth=2, zorder=3)
         ax.text(asc_angle, radius_house_num + 0.5, "ASC", ha='right', va='center', fontsize=12, weight='bold')
-
-        # MC-ICライン
         mc_angle = np.deg2rad(ascmc[1])
         ax.plot([mc_angle, mc_angle + np.pi], [0, radius_sign-1.5], color='black', linewidth=2, zorder=3)
         ax.text(mc_angle, radius_house_num + 0.5, "MC", ha='center', va='bottom', fontsize=12, weight='bold')
 
-        # ハウスカスプ線と番号
         for i, cusp_deg in enumerate(cusps):
             angle = np.deg2rad(cusp_deg)
-            # ASC, MC以外のカスプ線
             if i + 1 not in [1, 4, 7, 10]:
                  ax.plot([angle, angle], [0, radius_sign-1.5], color='gray', linestyle='--', linewidth=1, zorder=1)
-
-            # ハウス番号
             next_cusp_deg = cusps[(i + 1) % 12]
-            # 0度をまたぐ場合の角度差を正しく計算
             if next_cusp_deg < cusp_deg:
                 angle_diff = (next_cusp_deg + 360) - cusp_deg
             else:
@@ -272,41 +248,43 @@ def create_horoscope_chart(celestial_bodies, cusps, ascmc):
             mid_angle = np.deg2rad(cusp_deg + angle_diff / 2)
             ax.text(mid_angle, radius_house_num, str(i + 1), ha='center', va='center', fontsize=12, color='gray', zorder=2)
 
-    # --- 3. 天体をプロット ---
-    radius_planet = 7.5
-    planet_positions_rad = {name: np.deg2rad(data['pos']) for name, data in celestial_bodies.items() if name not in SENSITIVE_POINTS}
+    # --- 3. 天体をプロット (重なり回避ロジックを改善) ---
+    radius_planet_base = 7.8
+    radius_step = 0.8
+    planets_to_plot = {name: data for name, data in celestial_bodies.items() if name not in SENSITIVE_POINTS}
+    sorted_planets = sorted(planets_to_plot.items(), key=lambda item: item[1]['pos'])
+    plot_info = {}
+    last_angle = -999
+    last_radius = radius_planet_base
     
-    # 天体の位置を調整して重なりを避ける
-    angles = list(planet_positions_rad.values())
-    adjusted_radii = [radius_planet] * len(angles)
-    for i in range(len(angles)):
-        for j in range(i + 1, len(angles)):
-            angle_diff = abs(angles[i] - angles[j])
-            angle_diff = min(angle_diff, 2 * np.pi - angle_diff)
-            if angle_diff < np.deg2rad(8): # 8度以内にあれば半径をずらす
-                adjusted_radii[j] = radius_planet - 0.8
-                if adjusted_radii[j] < 1: adjusted_radii[j] = radius_planet + 0.8
-
-    i = 0
-    for name, data in celestial_bodies.items():
-        if name in SENSITIVE_POINTS: continue
-        
+    # 天体の描画位置を計算
+    for i, (name, data) in enumerate(sorted_planets):
         angle_rad = np.deg2rad(data['pos'])
-        radius = adjusted_radii[i]
-        
-        # 天体シンボル
-        ax.text(angle_rad, radius, PLANET_SYMBOLS[name], ha='center', va='center',
-                fontsize=16, color=PLANET_COLORS[name], weight='bold', zorder=4)
+        angle_diff = np.rad2deg(angle_rad - last_angle)
+        if angle_diff < 0: angle_diff += 360
+        current_radius = radius_planet_base
+        if angle_diff < 10:
+            if last_radius == radius_planet_base:
+                current_radius = radius_planet_base - radius_step
+            else:
+                current_radius = radius_planet_base
+        plot_info[name] = {'angle': angle_rad, 'radius': current_radius}
+        last_angle = angle_rad
+        last_radius = current_radius
 
-        # 天体の度数情報
-        pos_in_sign = data['pos'] % DEGREES_PER_SIGN
-        deg = int(pos_in_sign)
-        minute = int((pos_in_sign - deg) * 60)
-        retro_str = " R" if data.get('is_retro', False) else ""
+    # 天体を実際に描画
+    for name, data in celestial_bodies.items():
+        if name not in plot_info: continue
+        info = plot_info[name]
+        angle_rad, radius = info['angle'], info['radius']
         
-        ax.text(angle_rad, radius - 0.7, f"{deg}°{minute:02d}'{retro_str}",
-                ha='center', va='center', fontsize=8, zorder=4)
-        i += 1
+        ax.text(angle_rad, radius, PLANET_SYMBOLS[name], ha='center', va='center',
+                fontsize=16, color=PLANET_COLORS[name], weight='bold', zorder=5)
+        pos_in_sign = data['pos'] % DEGREES_PER_SIGN
+        deg, minute = int(pos_in_sign), int((pos_in_sign - int(pos_in_sign)) * 60)
+        retro_str = " R" if data.get('is_retro', False) else ""
+        ax.text(angle_rad, radius - 0.8, f"{deg}°{minute:02d}'{retro_str}",
+                ha='center', va='top', fontsize=8, zorder=4)
 
     # 内側の円
     ax.add_artist(plt.Circle((0, 0), 3, color='white', zorder=0))
@@ -323,9 +301,14 @@ st.write("生年月日、出生時刻、出生地（都道府県）を入力し�
 # --- 入力フォーム ---
 with st.sidebar:
     st.header("出生情報を入力")
-    birth_date = st.date_input("📅 生年月日", value=datetime(1990, 1, 1))
-    birth_time = st.time_input("⏰ 出生時刻 (24時間表記)", value=datetime(1990, 1, 1, 12, 0).time())
-    prefecture = st.selectbox("📍 出生地（都道府県）", options=list(PREFECTURE_DATA.keys()), index=12) # デフォルトは東京
+    birth_date = st.date_input(
+        "📅 生年月日",
+        value=datetime(1990, 1, 1),
+        min_value=datetime(1900, 1, 1),
+        max_value=datetime(2099, 12, 31)
+    )
+    birth_time_str = st.text_input("⏰ 出生時刻 (HH:MM)", value="12:00")
+    prefecture = st.selectbox("📍 出生地（都道府県）", options=list(PREFECTURE_DATA.keys()), index=12)
 
     if st.button("ホロスコープを作成する", type="primary"):
         is_ready = True
@@ -336,37 +319,33 @@ with st.sidebar:
 # --- 計算と表示 ---
 if is_ready:
     try:
-        # 入力値をdatetimeオブジェクトに結合
+        # 時刻文字列をパース
+        try:
+            birth_time = datetime.strptime(birth_time_str, "%H:%M").time()
+        except ValueError:
+            st.error("時刻の形式が正しくありません。「HH:MM」（例: 16:29）の形式で入力してください。")
+            st.stop()
+
         dt_local = datetime.combine(birth_date, birth_time)
-        
-        # JSTタイムゾーンを設定
         jst = timezone(timedelta(hours=9))
         dt_local_aware = dt_local.replace(tzinfo=jst)
-        
-        # UTCに変換
         dt_utc = dt_local_aware.astimezone(timezone.utc)
-
-        # 緯度経度を取得
         lat = PREFECTURE_DATA[prefecture]["lat"]
         lon = PREFECTURE_DATA[prefecture]["lon"]
 
         st.header(f"{dt_local.strftime('%Y年%m月%d日 %H:%M')} 生まれ ({prefecture})")
 
         with st.spinner("ホロスコープを計算中..."):
-            # 天体データとハウスを計算
             celestial_bodies, cusps, ascmc = calculate_celestial_data(dt_utc, lat, lon)
 
         if celestial_bodies:
             col1, col2 = st.columns([2, 1])
-
             with col1:
                 st.subheader("ホロスコープチャート")
                 with st.spinner("チャートを描画中..."):
                     fig = create_horoscope_chart(celestial_bodies, cusps, ascmc)
                     st.pyplot(fig)
-
             with col2:
-                # 天体リストの表示
                 st.subheader("天体位置リスト")
                 planet_data = []
                 for name, data in celestial_bodies.items():
@@ -380,17 +359,9 @@ if is_ready:
                     ])
                 st.dataframe(
                     planet_data,
-                    column_config={
-                        0: "天体/感受点",
-                        1: "サインと度数",
-                        2: "逆行",
-                        3: "ハウス"
-                    },
-                    hide_index=True,
-                    use_container_width=True
+                    column_config={0: "天体/感受点", 1: "サインと度数", 2: "逆行", 3: "ハウス"},
+                    hide_index=True, use_container_width=True
                 )
-
-                # アスペクトリストの表示
                 st.subheader("アスペクトリスト")
                 with st.spinner("アスペクトを計算中..."):
                     aspects = calculate_aspects_list(celestial_bodies)
@@ -402,4 +373,3 @@ if is_ready:
     except Exception as e:
         st.error(f"エラーが発生しました: {e}")
         st.error("入力内容を確認するか、管理者にお問い合わせください。")
-
