@@ -28,7 +28,6 @@ if jp_font_path:
     font_prop = fm.FontProperties(fname=jp_font_path)
     plt.rcParams['font.family'] = font_prop.get_name()
 else:
-    # 警告メッセージは表示しない
     plt.rcParams['font.family'] = 'sans-serif'
 
 
@@ -48,7 +47,7 @@ PLANET_NAMES = {
 PLANET_SYMBOLS = {
     "太陽": "☉", "月": "☽", "水星": "☿", "金星": "♀", "火星": "♂", "木星": "♃", "土星": "♄",
     "天王星": "♅", "海王星": "♆", "冥王星": "♇", "キロン": "⚷", "リリス": "⚸",
-    "ドラゴンヘッド": "☊", "ドラゴンテイル": "☋", "ASC": "Asc", "MC": "MC"
+    "ドラゴンヘッド": "☊", "ドラゴンテイル": "☋", "ASC": "ASC", "MC": "MC"
 }
 PLANET_COLORS = {
     "太陽": "gold", "月": "silver", "水星": "lightgrey", "金星": "hotpink", "火星": "red",
@@ -151,7 +150,9 @@ def calculate_aspects_dict(celestial_bodies):
                 if p1.get('id') in LUMINARIES or p2.get('id') in LUMINARIES: orb += 2
                 current_orb = abs(angle_diff - params['angle'])
                 if current_orb < orb:
-                    aspect_string = f"{PLANET_SYMBOLS[p1_name]} {p1_name} - {PLANET_SYMBOLS[p2_name]} {p2_name} (オーブ {current_orb:.2f}°)"
+                    name1 = p1_name if p1_name in ["ASC", "MC"] else f"{PLANET_SYMBOLS.get(p1_name, '')} {p1_name}"
+                    name2 = p2_name if p2_name in ["ASC", "MC"] else f"{PLANET_SYMBOLS.get(p2_name, '')} {p2_name}"
+                    aspect_string = f"{name1} - {name2} (オーブ {current_orb:.2f}°)"
                     aspect_dict[aspect_name].append(aspect_string)
     return aspect_dict
 
@@ -195,7 +196,7 @@ def create_horoscope_chart(celestial_bodies, cusps, ascmc):
         ax.text(mid_angle_rad, radius_house_num, str(i + 1), ha='center', va='center', fontsize=12, color='gray', zorder=2)
 
     # 3. 天体
-    radius_planet_base, radius_step = 7.8, 0.8
+    radius_planet_base, radius_step = 7.8, 0.9
     planets_to_plot = {name: data for name, data in celestial_bodies.items() if name not in SENSITIVE_POINTS}
     sorted_planets = sorted(planets_to_plot.items(), key=lambda item: apply_rotation(item[1]['pos']))
     plot_info = {}
@@ -205,7 +206,7 @@ def create_horoscope_chart(celestial_bodies, cusps, ascmc):
         angle_deg = apply_rotation(data['pos'])
         angle_diff = (angle_deg - last_angle_deg + 360) % 360
         current_radius = radius_planet_base
-        if angle_diff < 12:
+        if angle_diff < 15: # 重なり判定の角度を広げる
             if last_radius == radius_planet_base:
                 current_radius = radius_planet_base - radius_step
             else:
@@ -258,8 +259,12 @@ if is_ready:
                     sign, deg_str = get_degree_parts(data['pos'])
                     retro = "R" if data.get('is_retro') else ""
                     house = get_house_number(data['pos'], cusps) if cusps else "-"
+                    
+                    # ASC/MCの重複表記を修正
+                    name_str = name if name in ["ASC", "MC"] else f"{PLANET_SYMBOLS.get(name, '')} {name}"
+                    
                     planet_data.append([
-                        f"{PLANET_SYMBOLS.get(name, '')} {name}",
+                        name_str,
                         sign,
                         deg_str,
                         retro,
@@ -270,6 +275,8 @@ if is_ready:
                     planet_data,
                     columns=["天体/感受点", "サイン", "度数", "逆行", "ハウス"]
                 )
+                
+                # DataFrameを中央揃えで表示
                 st.dataframe(
                     df.style.set_properties(**{'text-align': 'center'}),
                     hide_index=True,
