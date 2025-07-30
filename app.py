@@ -28,7 +28,7 @@ if jp_font_path:
     font_prop = fm.FontProperties(fname=jp_font_path)
     plt.rcParams['font.family'] = font_prop.get_name()
 else:
-    st.warning(f"日本語フォントファイル '{JP_FONT_FILE}' が見つかりません。チャートの文字が正しく表示されない可能性があります。サイドバーの説明に従ってフォントを配置してください。")
+    # 警告メッセージは表示しない
     plt.rcParams['font.family'] = 'sans-serif'
 
 
@@ -187,11 +187,8 @@ def create_horoscope_chart(celestial_bodies, cusps, ascmc):
     radius_house_num = 6.5
     for i, cusp_deg in enumerate(cusps):
         angle = np.deg2rad(apply_rotation(cusp_deg))
-        # すべてのハウスカスプを同じスタイル（グレーの破線）で描画
-        ax.plot([angle, angle], [3, radius_sign - 1.5],
-                color='gray',
-                linestyle='--',
-                linewidth=1, zorder=1)
+        ax.plot([angle, angle], [0, radius_sign - 1.5],
+                color='gray', linestyle='--', linewidth=1, zorder=1)
         next_cusp_deg = cusps[(i + 1) % 12]
         mid_angle_deg = cusp_deg + (((next_cusp_deg - cusp_deg) + 360) % 360) / 2
         mid_angle_rad = np.deg2rad(apply_rotation(mid_angle_deg))
@@ -203,12 +200,20 @@ def create_horoscope_chart(celestial_bodies, cusps, ascmc):
     sorted_planets = sorted(planets_to_plot.items(), key=lambda item: apply_rotation(item[1]['pos']))
     plot_info = {}
     last_angle_deg = -999
+    last_radius = radius_planet_base
     for name, data in sorted_planets:
         angle_deg = apply_rotation(data['pos'])
         angle_diff = (angle_deg - last_angle_deg + 360) % 360
-        current_radius = radius_planet_base if angle_diff > 10 or plot_info.get(sorted_planets[-1][0], {}).get('radius') != radius_planet_base else radius_planet_base - radius_step
+        current_radius = radius_planet_base
+        if angle_diff < 12:
+            if last_radius == radius_planet_base:
+                current_radius = radius_planet_base - radius_step
+            else:
+                current_radius = radius_planet_base
         plot_info[name] = {'angle': np.deg2rad(angle_deg), 'radius': current_radius}
         last_angle_deg = angle_deg
+        last_radius = current_radius
+        
     for name, data in celestial_bodies.items():
         if name in plot_info:
             info = plot_info[name]
@@ -216,8 +221,6 @@ def create_horoscope_chart(celestial_bodies, cusps, ascmc):
             pos_in_sign = data['pos'] % 30
             ax.text(info['angle'], info['radius'] - 0.8, f"{int(pos_in_sign)}°{int((pos_in_sign - int(pos_in_sign)) * 60):02d}'{' R' if data.get('is_retro') else ''}", ha='center', va='top', fontsize=8, zorder=4)
 
-    ax.add_artist(plt.Circle((0, 0), 3, color='white', zorder=3))
-    ax.add_artist(plt.Circle((0, 0), 3, color='lightgray', fill=False, zorder=3))
     return fig
 
 # --- Streamlit UI ---
@@ -230,8 +233,6 @@ with st.sidebar:
     birth_date = st.date_input("📅 生年月日", datetime(1990, 1, 1), min_value=datetime(1900, 1, 1), max_value=datetime(2099, 12, 31))
     birth_time_str = st.text_input("⏰ 出生時刻 (HH:MM)", "12:00")
     prefecture = st.selectbox("📍 出生地（都道府県）", PREFECTURE_DATA.keys(), index=12)
-    st.markdown("---")
-    st.info("チャートを正しく表示するには、日本語フォント `ipaexg.ttf` が必要です。[IPAexゴシック](https://moji.or.jp/ipafont/ipaex00401/)をダウンロードし、このアプリと同じフォルダに配置してください。")
     is_ready = st.button("ホロスコープを作成する", type="primary")
 
 if is_ready:
@@ -270,7 +271,7 @@ if is_ready:
                     columns=["天体/感受点", "サイン", "度数", "逆行", "ハウス"]
                 )
                 st.dataframe(
-                    df,
+                    df.style.set_properties(**{'text-align': 'center'}),
                     hide_index=True,
                     use_container_width=True
                 )
