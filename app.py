@@ -60,11 +60,11 @@ SENSITIVE_POINTS = ["ASC", "MC"]
 
 # アスペクト
 ASPECTS = {
-    "コンジャンクション (0°)": {"angle": 0, "orb": 8, "symbol": "☌"},
-    "セクスタイル (60°)": {"angle": 60, "orb": 4, "symbol": " sextile "},
-    "スクエア (90°)": {"angle": 90, "orb": 7, "symbol": "□"},
-    "トライン (120°)": {"angle": 120, "orb": 8, "symbol": "△"},
-    "オポジション (180°)": {"angle": 180, "orb": 8, "symbol": "☍"},
+    "コンジャンクション (0°)": {"angle": 0, "orb": 8},
+    "オポジション (180°)": {"angle": 180, "orb": 8},
+    "トライン (120°)": {"angle": 120, "orb": 8},
+    "スクエア (90°)": {"angle": 90, "orb": 7},
+    "セクスタイル (60°)": {"angle": 60, "orb": 4},
 }
 
 # 都道府県データ
@@ -96,11 +96,11 @@ PREFECTURE_DATA = {
 }
 
 # --- ヘルパー関数 ---
-def format_degree(d):
+def get_degree_parts(d):
     d %= 360
     sign_index = int(d / DEGREES_PER_SIGN)
     pos_in_sign = d % DEGREES_PER_SIGN
-    return f"{SIGN_NAMES[sign_index]} {int(pos_in_sign):02d}°{int((pos_in_sign - int(pos_in_sign)) * 60):02d}'"
+    return SIGN_NAMES[sign_index], f"{int(pos_in_sign):02d}°{int((pos_in_sign - int(pos_in_sign)) * 60):02d}'"
 
 def get_house_number(degree, cusps):
     cusps_with_13th = list(cusps) + [(cusps[0] + 360) % 360]
@@ -136,8 +136,8 @@ def calculate_celestial_data(dt_utc, lat, lon):
         st.warning(f"ハウスが計算できませんでした: {e}")
         return celestial_bodies, None, None
 
-def calculate_aspects_list(celestial_bodies):
-    aspect_list = []
+def calculate_aspects_dict(celestial_bodies):
+    aspect_dict = {name: [] for name in ASPECTS.keys()}
     all_points = list(celestial_bodies.keys())
     for i in range(len(all_points)):
         for j in range(i + 1, len(all_points)):
@@ -148,9 +148,11 @@ def calculate_aspects_list(celestial_bodies):
             for aspect_name, params in ASPECTS.items():
                 orb = params['orb']
                 if p1.get('id') in LUMINARIES or p2.get('id') in LUMINARIES: orb += 2
-                if abs(angle_diff - params['angle']) < orb:
-                    aspect_list.append(f"{PLANET_SYMBOLS[p1_name]} {p1_name} - {PLANET_SYMBOLS[p2_name]} {p2_name} : {aspect_name} (オーブ {abs(angle_diff - params['angle']):.2f}°)")
-    return aspect_list
+                current_orb = abs(angle_diff - params['angle'])
+                if current_orb < orb:
+                    aspect_string = f"{PLANET_SYMBOLS[p1_name]} {p1_name} - {PLANET_SYMBOLS[p2_name]} {p2_name} (オーブ {current_orb:.2f}°)"
+                    aspect_dict[aspect_name].append(aspect_string)
+    return aspect_dict
 
 # --- 描画関数 ---
 def create_horoscope_chart(celestial_bodies, cusps, ascmc):
@@ -159,7 +161,6 @@ def create_horoscope_chart(celestial_bodies, cusps, ascmc):
     ax.set_theta_direction(1)
     ax.set_rlim(0, 10)
     ax.spines['polar'].set_visible(False)
-    # グリッド線とラベルを完全に削除
     ax.set_thetagrids([], [])
     ax.set_rgrids([], [])
 
@@ -180,10 +181,6 @@ def create_horoscope_chart(celestial_bodies, cusps, ascmc):
             ax.fill_between(np.linspace(start_angle, end_angle, 100), radius_sign - 1.5, radius_sign, color=color, zorder=0)
         ax.plot([start_angle, start_angle], [radius_sign - 1.5, radius_sign], color='lightgray', linewidth=1)
         ax.text(mid_angle, radius_sign - 0.7, SIGN_SYMBOLS[i], ha='center', va='center', fontsize=20, zorder=2)
-        if jp_font_path:
-            text_rotation = np.rad2deg(mid_angle) + (90 if 90 < mid_deg < 270 else -90)
-            ax.text(mid_angle, radius_sign - 2.2, SIGN_NAMES[i], ha='center', va='center', fontsize=9, rotation=text_rotation, zorder=2)
-    ax.add_artist(plt.Circle((0, 0), radius_sign, color='gray', fill=False, linewidth=1))
 
     # 2. ハウスのカスプ
     radius_house_num = 6.5
@@ -199,14 +196,7 @@ def create_horoscope_chart(celestial_bodies, cusps, ascmc):
         mid_angle_rad = np.deg2rad(apply_rotation(mid_angle_deg))
         ax.text(mid_angle_rad, radius_house_num, str(i + 1), ha='center', va='center', fontsize=12, color='gray', zorder=2)
 
-    # 3. 軸のラベル
-    mc_angle = np.deg2rad(apply_rotation(ascmc[1]))
-    ax.text(np.pi, radius_house_num + 0.5, "ASC", ha='right', va='center', fontsize=12, weight='bold')
-    ax.text(0, radius_house_num + 0.5, "DSC", ha='left', va='center', fontsize=10)
-    ax.text(mc_angle, radius_house_num + 0.5, "MC", ha='center', va='bottom', fontsize=12, weight='bold')
-    ax.text(mc_angle + np.pi, radius_house_num + 0.5, "IC", ha='center', va='top', fontsize=10)
-
-    # 4. 天体
+    # 3. 天体
     radius_planet_base, radius_step = 7.8, 0.8
     planets_to_plot = {name: data for name, data in celestial_bodies.items() if name not in SENSITIVE_POINTS}
     sorted_planets = sorted(planets_to_plot.items(), key=lambda item: apply_rotation(item[1]['pos']))
@@ -261,16 +251,44 @@ if is_ready:
                     st.pyplot(fig)
             with col2:
                 st.subheader("天体位置リスト")
-                planet_data = [[f"{PLANET_SYMBOLS.get(name, '')} {name}", format_degree(data['pos']), "R" if data.get('is_retro') else "", get_house_number(data['pos'], cusps) if cusps else "-"] for name, data in celestial_bodies.items()]
-                st.dataframe(planet_data, column_config={0: "天体/感受点", 1: "サインと度数", 2: "逆行", 3: "ハウス"}, hide_index=True, use_container_width=True)
+                planet_data = []
+                for name, data in celestial_bodies.items():
+                    sign, deg_str = get_degree_parts(data['pos'])
+                    retro = "R" if data.get('is_retro') else ""
+                    house = get_house_number(data['pos'], cusps) if cusps else "-"
+                    planet_data.append([
+                        f"{PLANET_SYMBOLS.get(name, '')} {name}",
+                        sign,
+                        deg_str,
+                        retro,
+                        house
+                    ])
+                st.dataframe(
+                    planet_data,
+                    column_headers=("天体/感受点", "サイン", "度数", "逆行", "ハウス"),
+                    hide_index=True,
+                    use_container_width=True
+                )
+
                 st.subheader("アスペクトリスト")
                 with st.spinner("アスペクトを計算中..."):
-                    aspects = calculate_aspects_list(celestial_bodies)
-                if aspects: st.text("\n".join(aspects))
-                else: st.info("設定されたオーブ内に主要なアスペクトは見つかりませんでした。")
+                    aspects_by_type = calculate_aspects_dict(celestial_bodies)
+                
+                has_any_aspect = any(aspects_by_type.values())
+                if has_any_aspect:
+                    for aspect_name, aspect_list in aspects_by_type.items():
+                        if aspect_list:
+                            short_name = aspect_name.split(" ")[0]
+                            with st.expander(f"{short_name} ({len(aspect_list)})"):
+                                for aspect_string in aspect_list:
+                                    st.text(f"・{aspect_string}")
+                else:
+                    st.info("設定されたオーブ内に主要なアスペクトは見つかりませんでした。")
+
         else:
             st.error("データの計算に失敗しました。入力時刻が高緯度などの理由でハウス分割できない可能性があります。")
     except ValueError:
         st.error("時刻の形式が正しくありません。「HH:MM」（例: 16:29）の形式で入力してください。")
     except Exception as e:
         st.error(f"予期せぬエラーが発生しました: {e}")
+
