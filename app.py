@@ -6,6 +6,7 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
+import pandas as pd
 
 # --- 定数定義 ---
 
@@ -186,11 +187,11 @@ def create_horoscope_chart(celestial_bodies, cusps, ascmc):
     radius_house_num = 6.5
     for i, cusp_deg in enumerate(cusps):
         angle = np.deg2rad(apply_rotation(cusp_deg))
-        is_angular = (i + 1) in [1, 4, 7, 10]
-        ax.plot([angle, angle], [0 if is_angular else 3, radius_sign - 1.5],
-                color='black' if is_angular else 'gray',
-                linestyle='-' if is_angular else '--',
-                linewidth=1.5 if is_angular else 1, zorder=1)
+        # すべてのハウスカスプを同じスタイル（グレーの破線）で描画
+        ax.plot([angle, angle], [3, radius_sign - 1.5],
+                color='gray',
+                linestyle='--',
+                linewidth=1, zorder=1)
         next_cusp_deg = cusps[(i + 1) % 12]
         mid_angle_deg = cusp_deg + (((next_cusp_deg - cusp_deg) + 360) % 360) / 2
         mid_angle_rad = np.deg2rad(apply_rotation(mid_angle_deg))
@@ -263,9 +264,13 @@ if is_ready:
                         retro,
                         house
                     ])
-                st.dataframe(
+                
+                df = pd.DataFrame(
                     planet_data,
-                    column_headers=("天体/感受点", "サイン", "度数", "逆行", "ハウス"),
+                    columns=["天体/感受点", "サイン", "度数", "逆行", "ハウス"]
+                )
+                st.dataframe(
+                    df,
                     hide_index=True,
                     use_container_width=True
                 )
@@ -291,4 +296,3 @@ if is_ready:
         st.error("時刻の形式が正しくありません。「HH:MM」（例: 16:29）の形式で入力してください。")
     except Exception as e:
         st.error(f"予期せぬエラーが発生しました: {e}")
-
