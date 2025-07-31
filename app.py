@@ -160,9 +160,13 @@ def calculate_all_data(dt_utc, lat, lon):
     if not cusps: # ハウス計算失敗時は中止
         return None, None, None, None, None
 
-    # 2. プログレス計算 (一日一年法)
-    progressed_days = (datetime.now(timezone.utc).date() - dt_utc.date()).days
-    prog_dt_utc = dt_utc + timedelta(days=progressed_days)
+    # 2. プログレス計算 (一日一年法) - 修正箇所
+    # 満年齢を日数で計算
+    age_in_days = (datetime.now(timezone.utc) - dt_utc).days
+    # 経過年数を計算 (正確性のため)
+    age_in_years = age_in_days / 365.2425
+    # プログレスの日付を計算 (出生日 + 経過年数に相当する日数)
+    prog_dt_utc = dt_utc + timedelta(days=age_in_years)
     jd_ut_prog, _ = swe.utc_to_jd(prog_dt_utc.year, prog_dt_utc.month, prog_dt_utc.day, prog_dt_utc.hour, prog_dt_utc.minute, prog_dt_utc.second, 1)
     progressed_bodies, _, _ = _calculate_celestial_bodies(jd_ut_prog, lat, lon)
 
@@ -213,7 +217,9 @@ def _plot_planets_on_circle(ax, bodies, radius, rotation_offset, label, label_co
 
     # 天体をプロット
     plot_info = {}
-    sorted_planets = sorted(bodies.items(), key=lambda item: item[1]['pos'])
+    # SENSITIVE_POINTSを除外してソート
+    planets_to_plot = {name: data for name, data in bodies.items() if name not in SENSITIVE_POINTS}
+    sorted_planets = sorted(planets_to_plot.items(), key=lambda item: item[1]['pos'])
     
     # 衝突回避のための簡易的なロジック
     last_angle_deg = -999
@@ -221,8 +227,6 @@ def _plot_planets_on_circle(ax, bodies, radius, rotation_offset, label, label_co
     radius_step = 0.6 # 天体が近い場合にずらす半径
 
     for name, data in sorted_planets:
-        if name in SENSITIVE_POINTS: continue
-        
         angle_deg = (data['pos'] + rotation_offset) % 360
         angle_rad = np.deg2rad(angle_deg)
         
