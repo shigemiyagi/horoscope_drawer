@@ -146,7 +146,7 @@ def _calculate_celestial_bodies(jd_ut, lat, lon, calc_houses=False):
     return celestial_bodies, None, None
 
 
-def calculate_all_data(dt_utc, lat, lon):
+def calculate_all_data(dt_utc, lat, lon, transit_dt_utc):
     """ネイタル、プログレス、トランジットの全データを計算する"""
     ephe_path = 'ephe'
     if not os.path.exists(ephe_path):
@@ -167,8 +167,7 @@ def calculate_all_data(dt_utc, lat, lon):
     jd_ut_prog, _ = swe.utc_to_jd(prog_dt_utc.year, prog_dt_utc.month, prog_dt_utc.day, prog_dt_utc.hour, prog_dt_utc.minute, prog_dt_utc.second, 1)
     progressed_bodies, _, _ = _calculate_celestial_bodies(jd_ut_prog, lat, lon)
 
-    # 3. トランジット計算
-    transit_dt_utc = datetime.now(timezone.utc)
+    # 3. トランジット計算 (指定された日時を使用)
     jd_ut_transit, _ = swe.utc_to_jd(transit_dt_utc.year, transit_dt_utc.month, transit_dt_utc.day, transit_dt_utc.hour, transit_dt_utc.minute, transit_dt_utc.second, 1)
     transit_bodies, _, _ = _calculate_celestial_bodies(jd_ut_transit, lat, lon)
 
@@ -207,14 +206,10 @@ def calculate_natal_aspects(celestial_bodies):
     return aspect_list
 
 # --- 描画関数 ---
-def _plot_planets_on_circle(ax, bodies, radius, rotation_offset, label, label_color='black'):
-    """指定された半径の円周上に天体をプロットする内部関数"""
+def _plot_planets_on_circle(ax, bodies, radius, rotation_offset):
+    """指定された半径の円周上に天体をプロットする内部関数 (ラベル描画なし)"""
     circle = plt.Circle((0, 0), radius, transform=ax.transData._b, color='lightgray', fill=False, linestyle='--', linewidth=0.5)
     ax.add_artist(circle)
-
-    ax.text(np.deg2rad(rotation_offset + 90), radius, label,
-            ha='center', va='center', fontsize=10, color=label_color,
-            bbox=dict(boxstyle="round,pad=0.3", fc='white', ec="none", alpha=0.8))
 
     plot_info = {}
     planets_to_plot = {name: data for name, data in bodies.items() if name not in SENSITIVE_POINTS}
@@ -279,7 +274,7 @@ def create_tri_chart(natal, prog, trans, cusps, ascmc):
         ax.plot([start_angle, start_angle], [radius_sign - 1, radius_sign], color='lightgray', linewidth=1)
         ax.text(mid_angle, radius_sign - 0.5, SIGN_SYMBOLS[i], ha='center', va='center', fontsize=20, zorder=2)
 
-    # 2. ハウスのカスプ (すべて破線に変更)
+    # 2. ハウスのカスプ (すべて破線)
     radius_house_num = 3.5
     for i, cusp_deg in enumerate(cusps):
         angle = np.deg2rad(apply_rotation(cusp_deg))
@@ -297,12 +292,10 @@ def create_tri_chart(natal, prog, trans, cusps, ascmc):
     ax.text(np.deg2rad(apply_rotation(ascmc[0])), radius_sign-1.2, "ASC", ha='right', va='center', fontsize=12, color='black')
     ax.text(np.deg2rad(apply_rotation(ascmc[1])), radius_sign-1.2, "MC", ha='center', va='bottom', fontsize=12, color='black')
 
-    # 3. アスペクトラインは描画しない
-
-    # 4. 天体を三重円でプロット
-    _plot_planets_on_circle(ax, trans, 8.0, rotation_offset, "Transit", "blue")
-    _plot_planets_on_circle(ax, prog, 6.2, rotation_offset, "Progressed", "green")
-    _plot_planets_on_circle(ax, natal, 4.4, rotation_offset, "Natal", "red")
+    # 3. 天体を三重円でプロット
+    _plot_planets_on_circle(ax, trans, 8.0, rotation_offset)
+    _plot_planets_on_circle(ax, prog, 6.2, rotation_offset)
+    _plot_planets_on_circle(ax, natal, 4.4, rotation_offset)
     
     return fig
 
@@ -312,31 +305,52 @@ st.title("🪐 三重円ホロスコープ作成アプリ")
 st.write("ネイタル（内円）、プログレス（中円）、トランジット（外円）の三重円ホロスコープを作成します。")
 
 with st.sidebar:
-    st.header("出生情報を入力")
+    st.header("出生情報")
     birth_date = st.date_input("📅 生年月日", datetime(1990, 1, 1), min_value=datetime(1900, 1, 1), max_value=datetime.now())
     birth_time_str = st.text_input("⏰ 出生時刻 (HH:MM)", "12:00")
     prefecture = st.selectbox("📍 出生地（都道府県）", PREFECTURE_DATA.keys(), index=12)
+
+    st.header("トランジット指定")
+    use_custom_transit = st.checkbox("日時を指定する")
+    transit_date = st.date_input("📅 指定日", datetime.now(), disabled=not use_custom_transit, key="transit_date")
+    transit_time_str = st.text_input("⏰ 指定時刻 (HH:MM)", "12:00", disabled=not use_custom_transit, key="transit_time")
+    
     is_ready = st.button("ホロスコープを作成する", type="primary")
 
 if is_ready:
     try:
+        # 出生情報のパース
         birth_time = datetime.strptime(birth_time_str, "%H:%M").time()
         dt_local = datetime.combine(birth_date, birth_time)
         dt_utc = dt_local.replace(tzinfo=timezone(timedelta(hours=9))).astimezone(timezone.utc)
-        
         lat, lon = PREFECTURE_DATA[prefecture]["lat"], PREFECTURE_DATA[prefecture]["lon"]
-        
+
+        # トランジット日時の決定
+        if use_custom_transit:
+            try:
+                transit_time = datetime.strptime(transit_time_str, "%H:%M").time()
+                transit_dt_local = datetime.combine(transit_date, transit_time)
+                transit_dt_utc = transit_dt_local.replace(tzinfo=timezone(timedelta(hours=9))).astimezone(timezone.utc)
+                transit_display_str = transit_dt_local.strftime('%Y年%m月%d日 %H:%M')
+            except ValueError:
+                st.error("トランジットの指定時刻の形式が正しくありません。「HH:MM」で入力してください。")
+                st.stop()
+        else:
+            transit_dt_utc = datetime.now(timezone.utc)
+            transit_display_str = datetime.now(timezone(timedelta(hours=9))).strftime('%Y年%m月%d日 %H:%M')
+
         st.header(f"{dt_local.strftime('%Y年%m月%d日 %H:%M')} 生まれ ({prefecture})")
-        st.caption(f"現在時刻 (トランジット): {datetime.now(timezone(timedelta(hours=9))).strftime('%Y-%m-%d %H:%M:%S JST')}")
+        st.caption(f"プログレスは現在、トランジットは {transit_display_str} で計算")
         
         with st.spinner("ホロスコープを計算中..."):
-            natal_bodies, prog_bodies, trans_bodies, cusps, ascmc = calculate_all_data(dt_utc, lat, lon)
+            natal_bodies, prog_bodies, trans_bodies, cusps, ascmc = calculate_all_data(dt_utc, lat, lon, transit_dt_utc)
             natal_aspects = calculate_natal_aspects(natal_bodies) if natal_bodies else []
 
         if natal_bodies and cusps:
             col1, col2 = st.columns([3, 2])
             with col1:
                 st.subheader("ホロスコープチャート")
+                st.caption("内円: ネイタル  |  中円: プログレス  |  外円: トランジット")
                 with st.spinner("チャートを描画中..."):
                     fig = create_tri_chart(natal_bodies, prog_bodies, trans_bodies, cusps, ascmc)
                     st.pyplot(fig)
@@ -388,19 +402,17 @@ if is_ready:
 
                             # 天体1の情報
                             p1_sign, _ = get_degree_parts(p1_data['pos'])
-                            p1_house = get_house_number(p1_data['pos'], cusps)
+                            p1_house = get_house_number(p1_data['pos'], cusps) if p1_name not in SENSITIVE_POINTS else '-'
                             p1_retro = "R" if p1_data.get('is_retro') else ""
                             p1_display_name = f"{p1_name} {p1_retro}".strip()
-                            p1_details = f"{p1_sign} {p1_house}ハウス"
-                            if p1_name in SENSITIVE_POINTS: p1_display_name = p1_name
+                            p1_details = f"{p1_sign} {p1_house}ハウス" if p1_name not in SENSITIVE_POINTS else p1_sign
 
                             # 天体2の情報
                             p2_sign, _ = get_degree_parts(p2_data['pos'])
-                            p2_house = get_house_number(p2_data['pos'], cusps)
+                            p2_house = get_house_number(p2_data['pos'], cusps) if p2_name not in SENSITIVE_POINTS else '-'
                             p2_retro = "R" if p2_data.get('is_retro') else ""
                             p2_display_name = f"{p2_name} {p2_retro}".strip()
-                            p2_details = f"{p2_sign} {p2_house}ハウス"
-                            if p2_name in SENSITIVE_POINTS: p2_display_name = p2_name
+                            p2_details = f"{p2_sign} {p2_house}ハウス" if p2_name not in SENSITIVE_POINTS else p2_sign
 
                             aspect_name = aspect['aspect_name'].split(" ")[0]
                             orb_str = f"{aspect['orb']:.2f}°"
