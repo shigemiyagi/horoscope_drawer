@@ -160,12 +160,9 @@ def calculate_all_data(dt_utc, lat, lon):
     if not cusps: # ハウス計算失敗時は中止
         return None, None, None, None, None
 
-    # 2. プログレス計算 (一日一年法) - 修正箇所
-    # 満年齢を日数で計算
+    # 2. プログレス計算 (一日一年法)
     age_in_days = (datetime.now(timezone.utc) - dt_utc).days
-    # 経過年数を計算 (正確性のため)
     age_in_years = age_in_days / 365.2425
-    # プログレスの日付を計算 (出生日 + 経過年数に相当する日数)
     prog_dt_utc = dt_utc + timedelta(days=age_in_years)
     jd_ut_prog, _ = swe.utc_to_jd(prog_dt_utc.year, prog_dt_utc.month, prog_dt_utc.day, prog_dt_utc.hour, prog_dt_utc.minute, prog_dt_utc.second, 1)
     progressed_bodies, _, _ = _calculate_celestial_bodies(jd_ut_prog, lat, lon)
@@ -184,6 +181,12 @@ def calculate_natal_aspects(celestial_bodies):
     for i in range(len(all_points)):
         for j in range(i + 1, len(all_points)):
             p1_name, p2_name = all_points[i], all_points[j]
+            
+            # ドラゴンヘッドとテイルのオポジションは表示しない
+            if (p1_name == "ドラゴンヘッド" and p2_name == "ドラゴンテイル") or \
+               (p1_name == "ドラゴンテイル" and p2_name == "ドラゴンヘッド"):
+                continue
+
             p1, p2 = celestial_bodies[p1_name], celestial_bodies[p2_name]
             
             angle_diff = abs(p1['pos'] - p2['pos'])
@@ -206,36 +209,30 @@ def calculate_natal_aspects(celestial_bodies):
 # --- 描画関数 ---
 def _plot_planets_on_circle(ax, bodies, radius, rotation_offset, label, label_color='black'):
     """指定された半径の円周上に天体をプロットする内部関数"""
-    # 円を描画
     circle = plt.Circle((0, 0), radius, transform=ax.transData._b, color='lightgray', fill=False, linestyle='--', linewidth=0.5)
     ax.add_artist(circle)
 
-    # ラベルをプロット
     ax.text(np.deg2rad(rotation_offset + 90), radius, label,
             ha='center', va='center', fontsize=10, color=label_color,
             bbox=dict(boxstyle="round,pad=0.3", fc='white', ec="none", alpha=0.8))
 
-    # 天体をプロット
     plot_info = {}
-    # SENSITIVE_POINTSを除外してソート
     planets_to_plot = {name: data for name, data in bodies.items() if name not in SENSITIVE_POINTS}
     sorted_planets = sorted(planets_to_plot.items(), key=lambda item: item[1]['pos'])
     
-    # 衝突回避のための簡易的なロジック
     last_angle_deg = -999
     last_radius_offset = 0
-    radius_step = 0.6 # 天体が近い場合にずらす半径
+    radius_step = 0.6
 
     for name, data in sorted_planets:
         angle_deg = (data['pos'] + rotation_offset) % 360
         angle_rad = np.deg2rad(angle_deg)
         
-        # 角度が近い場合に半径をずらす
         angle_diff = (angle_deg - last_angle_deg + 360) % 360
         current_radius_offset = 0
         if angle_diff < 15:
             current_radius_offset = last_radius_offset - radius_step if last_radius_offset >= 0 else last_radius_offset + radius_step
-            if abs(current_radius_offset) > radius_step * 2 : current_radius_offset = 0 # 3つ以上重なったらリセット
+            if abs(current_radius_offset) > radius_step * 2 : current_radius_offset = 0
         
         plot_info[name] = {'angle': angle_rad, 'radius': radius + current_radius_offset}
         last_angle_deg = angle_deg
@@ -252,7 +249,7 @@ def _plot_planets_on_circle(ax, bodies, radius, rotation_offset, label, label_co
                     ha='center', va='top', fontsize=7, zorder=14)
 
 
-def create_tri_chart(natal, prog, trans, cusps, ascmc, aspects):
+def create_tri_chart(natal, prog, trans, cusps, ascmc):
     """三重円ホロスコープチャートを作成する"""
     fig, ax = plt.subplots(figsize=(10, 10), subplot_kw={'projection': 'polar'})
     ax.set_theta_zero_location('E')
@@ -262,7 +259,6 @@ def create_tri_chart(natal, prog, trans, cusps, ascmc, aspects):
     ax.set_thetagrids([], [])
     ax.set_rgrids([], [])
 
-    # ASCが左側(180度)に来るようにチャート全体を回転
     rotation_offset = 180 - ascmc[0]
     def apply_rotation(pos): return (pos + rotation_offset) % 360
 
@@ -274,7 +270,6 @@ def create_tri_chart(natal, prog, trans, cusps, ascmc, aspects):
         start_angle, end_angle, mid_angle = np.deg2rad(start_deg), np.deg2rad(end_deg), np.deg2rad(mid_deg)
         color = "aliceblue" if i % 2 == 0 else "white"
         
-        # 0度をまたぐ描画の補正
         if start_deg > end_deg:
             ax.fill_between(np.linspace(start_angle, 2 * np.pi, 50), radius_sign - 1, radius_sign, color=color, zorder=0)
             ax.fill_between(np.linspace(0, end_angle, 50), radius_sign - 1, radius_sign, color=color, zorder=0)
@@ -284,15 +279,14 @@ def create_tri_chart(natal, prog, trans, cusps, ascmc, aspects):
         ax.plot([start_angle, start_angle], [radius_sign - 1, radius_sign], color='lightgray', linewidth=1)
         ax.text(mid_angle, radius_sign - 0.5, SIGN_SYMBOLS[i], ha='center', va='center', fontsize=20, zorder=2)
 
-    # 2. ハウスのカスプとASC/MC
+    # 2. ハウスのカスプ (すべて破線に変更)
     radius_house_num = 3.5
     for i, cusp_deg in enumerate(cusps):
         angle = np.deg2rad(apply_rotation(cusp_deg))
-        is_ascmc_line = (i == 0 or i == 9) # ASC(1室) or MC(10室)
         ax.plot([angle, angle], [0, radius_sign - 1],
-                color='black' if is_ascmc_line else 'gray',
-                linestyle='-' if is_ascmc_line else '--',
-                linewidth=1.5 if is_ascmc_line else 1, zorder=5)
+                color='gray',
+                linestyle='--',
+                linewidth=1, zorder=5)
         
         next_cusp_deg = cusps[(i + 1) % 12]
         mid_angle_deg = cusp_deg + (((next_cusp_deg - cusp_deg) + 360) % 360) / 2
@@ -300,15 +294,10 @@ def create_tri_chart(natal, prog, trans, cusps, ascmc, aspects):
         ax.text(mid_angle_rad, radius_house_num, str(i + 1), ha='center', va='center', fontsize=12, color='gray', zorder=6)
     
     # ASC/MCラベル
-    ax.text(np.deg2rad(apply_rotation(ascmc[0])), radius_sign-1.2, "ASC", ha='right', va='center', fontsize=12, weight='bold', color='black')
-    ax.text(np.deg2rad(apply_rotation(ascmc[1])), radius_sign-1.2, "MC", ha='center', va='bottom', fontsize=12, weight='bold', color='black')
+    ax.text(np.deg2rad(apply_rotation(ascmc[0])), radius_sign-1.2, "ASC", ha='right', va='center', fontsize=12, color='black')
+    ax.text(np.deg2rad(apply_rotation(ascmc[1])), radius_sign-1.2, "MC", ha='center', va='bottom', fontsize=12, color='black')
 
-    # 3. アスペクトライン (ネイタル)
-    for aspect in aspects:
-        p1_angle = np.deg2rad(apply_rotation(aspect['p1_pos']))
-        p2_angle = np.deg2rad(apply_rotation(aspect['p2_pos']))
-        ax.plot([p1_angle, p2_angle], [4.2, 4.2], color=aspect['params']['color'],
-                linestyle='-', linewidth=1, zorder=3)
+    # 3. アスペクトラインは描画しない
 
     # 4. 天体を三重円でプロット
     _plot_planets_on_circle(ax, trans, 8.0, rotation_offset, "Transit", "blue")
@@ -332,7 +321,6 @@ with st.sidebar:
 if is_ready:
     try:
         birth_time = datetime.strptime(birth_time_str, "%H:%M").time()
-        # 入力はJST(UTC+9)と仮定
         dt_local = datetime.combine(birth_date, birth_time)
         dt_utc = dt_local.replace(tzinfo=timezone(timedelta(hours=9))).astimezone(timezone.utc)
         
@@ -350,7 +338,7 @@ if is_ready:
             with col1:
                 st.subheader("ホロスコープチャート")
                 with st.spinner("チャートを描画中..."):
-                    fig = create_tri_chart(natal_bodies, prog_bodies, trans_bodies, cusps, ascmc, natal_aspects)
+                    fig = create_tri_chart(natal_bodies, prog_bodies, trans_bodies, cusps, ascmc)
                     st.pyplot(fig)
             with col2:
                 st.subheader("天体位置データ")
@@ -395,15 +383,39 @@ if is_ready:
                     if natal_aspects:
                         aspect_data = []
                         for aspect in sorted(natal_aspects, key=lambda x: x['orb']):
-                            p1_sym = PLANET_SYMBOLS.get(aspect['p1_name'], aspect['p1_name'])
-                            p2_sym = PLANET_SYMBOLS.get(aspect['p2_name'], aspect['p2_name'])
-                            aspect_sym = aspect['params']['symbol']
+                            p1_name, p2_name = aspect['p1_name'], aspect['p2_name']
+                            p1_data, p2_data = natal_bodies[p1_name], natal_bodies[p2_name]
+
+                            # 天体1の情報
+                            p1_sign, _ = get_degree_parts(p1_data['pos'])
+                            p1_house = get_house_number(p1_data['pos'], cusps)
+                            p1_retro = "R" if p1_data.get('is_retro') else ""
+                            p1_display_name = f"{p1_name} {p1_retro}".strip()
+                            p1_details = f"{p1_sign} {p1_house}ハウス"
+                            if p1_name in SENSITIVE_POINTS: p1_display_name = p1_name
+
+                            # 天体2の情報
+                            p2_sign, _ = get_degree_parts(p2_data['pos'])
+                            p2_house = get_house_number(p2_data['pos'], cusps)
+                            p2_retro = "R" if p2_data.get('is_retro') else ""
+                            p2_display_name = f"{p2_name} {p2_retro}".strip()
+                            p2_details = f"{p2_sign} {p2_house}ハウス"
+                            if p2_name in SENSITIVE_POINTS: p2_display_name = p2_name
+
+                            aspect_name = aspect['aspect_name'].split(" ")[0]
+                            orb_str = f"{aspect['orb']:.2f}°"
+
                             aspect_data.append([
-                                f"{p1_sym} - {p2_sym}",
-                                aspect['aspect_name'].split(" ")[0],
-                                f"{aspect['orb']:.2f}°"
+                                p1_display_name, p1_details,
+                                aspect_name,
+                                p2_display_name, p2_details,
+                                orb_str
                             ])
-                        df_aspect = pd.DataFrame(aspect_data, columns=["天体ペア", "アスペクト", "オーブ"])
+                        
+                        df_aspect = pd.DataFrame(
+                            aspect_data,
+                            columns=["天体1", "詳細1", "アスペクト", "天体2", "詳細2", "オーブ"]
+                        )
                         st.dataframe(df_aspect, use_container_width=True)
                     else:
                         st.info("設定されたオーブ内に主要なアスペクトは見つかりませんでした。")
@@ -414,4 +426,4 @@ if is_ready:
         st.error("時刻の形式が正しくありません。「HH:MM」（例: 16:29）の形式で入力してください。")
     except Exception as e:
         st.error(f"予期せぬエラーが発生しました: {e}")
-        st.exception(e) # デバッグ用に例外の詳細を出力
+        st.exception(e)
