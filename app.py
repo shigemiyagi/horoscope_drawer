@@ -146,41 +146,32 @@ def _calculate_celestial_bodies(jd_ut, lat, lon, calc_houses=False):
     return celestial_bodies, None, None
 
 
-# ★変更点1: 計算処理を分割し、キャッシュを適用
-@st.cache_data
-def calculate_base_charts(_dt_utc, _lat, _lon):
-    """ネイタルとプログレスのデータを計算し、キャッシュする。
-       引数名の前にアンダースコアを付けるのは、キャッシュ関数であることを明示する慣習。"""
+def calculate_all_data(dt_utc, lat, lon, transit_dt_utc):
+    """ネイタル、プログレス、トランジットの全データを計算する"""
     ephe_path = 'ephe'
     if not os.path.exists(ephe_path):
-        # st.cache_data内のエラーは初回実行時のみ表示される
         st.error(f"天体暦ファイルが見つかりません。'{ephe_path}' フォルダをアプリのルートに配置してください。")
-        return None, None, None, None
+        return None, None, None, None, None
     swe.set_ephe_path(ephe_path)
 
     # 1. ネイタル計算
-    jd_ut_natal, _ = swe.utc_to_jd(_dt_utc.year, _dt_utc.month, _dt_utc.day, _dt_utc.hour, _dt_utc.minute, _dt_utc.second, 1)
-    natal_bodies, cusps, ascmc = _calculate_celestial_bodies(jd_ut_natal, _lat, _lon, calc_houses=True)
-    if not cusps:
-        return None, None, None, None
+    jd_ut_natal, _ = swe.utc_to_jd(dt_utc.year, dt_utc.month, dt_utc.day, dt_utc.hour, dt_utc.minute, dt_utc.second, 1)
+    natal_bodies, cusps, ascmc = _calculate_celestial_bodies(jd_ut_natal, lat, lon, calc_houses=True)
+    if not cusps: # ハウス計算失敗時は中止
+        return None, None, None, None, None
 
     # 2. プログレス計算 (一日一年法)
-    # プログレスは「現在」を基準にするため、この計算はキャッシュされても毎日結果が変わる
-    age_in_days = (datetime.now(timezone.utc) - _dt_utc).days
+    age_in_days = (datetime.now(timezone.utc) - dt_utc).days
     age_in_years = age_in_days / 365.2425
-    prog_dt_utc = _dt_utc + timedelta(days=age_in_years)
+    prog_dt_utc = dt_utc + timedelta(days=age_in_years)
     jd_ut_prog, _ = swe.utc_to_jd(prog_dt_utc.year, prog_dt_utc.month, prog_dt_utc.day, prog_dt_utc.hour, prog_dt_utc.minute, prog_dt_utc.second, 1)
-    progressed_bodies, _, _ = _calculate_celestial_bodies(jd_ut_prog, _lat, _lon)
+    progressed_bodies, _, _ = _calculate_celestial_bodies(jd_ut_prog, lat, lon)
 
-    return natal_bodies, progressed_bodies, cusps, ascmc
-
-def calculate_transit_chart(transit_dt_utc):
-    """トランジットのデータのみを計算する（キャッシュしない）"""
+    # 3. トランジット計算 (指定された日時を使用)
     jd_ut_transit, _ = swe.utc_to_jd(transit_dt_utc.year, transit_dt_utc.month, transit_dt_utc.day, transit_dt_utc.hour, transit_dt_utc.minute, transit_dt_utc.second, 1)
-    # トランジットの場所は通常考慮しないため、緯度経度は0でOK
-    transit_bodies, _, _ = _calculate_celestial_bodies(jd_ut_transit, 0, 0)
-    return transit_bodies
+    transit_bodies, _, _ = _calculate_celestial_bodies(jd_ut_transit, lat, lon)
 
+    return natal_bodies, progressed_bodies, transit_bodies, cusps, ascmc
 
 def calculate_natal_aspects(celestial_bodies):
     """ネイタルチャート内のアスペクトを計算する"""
@@ -189,15 +180,21 @@ def calculate_natal_aspects(celestial_bodies):
     for i in range(len(all_points)):
         for j in range(i + 1, len(all_points)):
             p1_name, p2_name = all_points[i], all_points[j]
+            
+            # ドラゴンヘッドとテイルのオポジションは表示しない
             if (p1_name == "ドラゴンヘッド" and p2_name == "ドラゴンテイル") or \
                (p1_name == "ドラゴンテイル" and p2_name == "ドラゴンヘッド"):
                 continue
+
             p1, p2 = celestial_bodies[p1_name], celestial_bodies[p2_name]
+            
             angle_diff = abs(p1['pos'] - p2['pos'])
             if angle_diff > 180: angle_diff = 360 - angle_diff
+
             for aspect_name, params in ASPECTS.items():
                 orb = params['orb']
                 if p1.get('id') in LUMINARIES or p2.get('id') in LUMINARIES: orb += 2
+                
                 current_orb = abs(angle_diff - params['angle'])
                 if current_orb < orb:
                     aspect_list.append({
@@ -213,30 +210,39 @@ def _plot_planets_on_circle(ax, bodies, radius, rotation_offset):
     """指定された半径の円周上に天体をプロットする内部関数 (ラベル描画なし)"""
     circle = plt.Circle((0, 0), radius, transform=ax.transData._b, color='lightgray', fill=False, linestyle='--', linewidth=0.5)
     ax.add_artist(circle)
+
     plot_info = {}
     planets_to_plot = {name: data for name, data in bodies.items() if name not in SENSITIVE_POINTS}
     sorted_planets = sorted(planets_to_plot.items(), key=lambda item: item[1]['pos'])
+    
     last_angle_deg = -999
     last_radius_offset = 0
     radius_step = 0.6
+
     for name, data in sorted_planets:
         angle_deg = (data['pos'] + rotation_offset) % 360
         angle_rad = np.deg2rad(angle_deg)
+        
         angle_diff = (angle_deg - last_angle_deg + 360) % 360
         current_radius_offset = 0
         if angle_diff < 15:
             current_radius_offset = last_radius_offset - radius_step if last_radius_offset >= 0 else last_radius_offset + radius_step
             if abs(current_radius_offset) > radius_step * 2 : current_radius_offset = 0
+        
         plot_info[name] = {'angle': angle_rad, 'radius': radius + current_radius_offset}
         last_angle_deg = angle_deg
         last_radius_offset = current_radius_offset
+
     for name, data in bodies.items():
         if name in plot_info:
             info = plot_info[name]
-            ax.text(info['angle'], info['radius'], PLANET_SYMBOLS[name], ha='center', va='center', fontsize=14, color=PLANET_COLORS.get(name, 'black'), zorder=15)
+            ax.text(info['angle'], info['radius'], PLANET_SYMBOLS[name], ha='center', va='center', fontsize=14,
+                    color=PLANET_COLORS.get(name, 'black'), weight='bold', zorder=15)
             pos_in_sign = data['pos'] % 30
             retro_str = ' R' if data.get('is_retro') else ''
-            ax.text(info['angle'], info['radius'] - 0.5, f"{int(pos_in_sign):02d}{retro_str}", ha='center', va='top', fontsize=7, zorder=14)
+            ax.text(info['angle'], info['radius'] - 0.5, f"{int(pos_in_sign):02d}{retro_str}",
+                    ha='center', va='top', fontsize=7, zorder=14)
+
 
 def create_tri_chart(natal, prog, trans, cusps, ascmc):
     """三重円ホロスコープチャートを作成する"""
@@ -247,47 +253,56 @@ def create_tri_chart(natal, prog, trans, cusps, ascmc):
     ax.spines['polar'].set_visible(False)
     ax.set_thetagrids([], [])
     ax.set_rgrids([], [])
+
     rotation_offset = 180 - ascmc[0]
     def apply_rotation(pos): return (pos + rotation_offset) % 360
+
+    # 1. サインの円 (一番外側)
     radius_sign = 9.5
     for i in range(12):
         start_deg, end_deg = apply_rotation(i * 30), apply_rotation((i + 1) * 30)
         mid_deg = apply_rotation(i * 30 + 15)
         start_angle, end_angle, mid_angle = np.deg2rad(start_deg), np.deg2rad(end_deg), np.deg2rad(mid_deg)
         color = "aliceblue" if i % 2 == 0 else "white"
+        
         if start_deg > end_deg:
             ax.fill_between(np.linspace(start_angle, 2 * np.pi, 50), radius_sign - 1, radius_sign, color=color, zorder=0)
             ax.fill_between(np.linspace(0, end_angle, 50), radius_sign - 1, radius_sign, color=color, zorder=0)
         else:
             ax.fill_between(np.linspace(start_angle, end_angle, 100), radius_sign - 1, radius_sign, color=color, zorder=0)
+        
         ax.plot([start_angle, start_angle], [radius_sign - 1, radius_sign], color='lightgray', linewidth=1)
         ax.text(mid_angle, radius_sign - 0.5, SIGN_SYMBOLS[i], ha='center', va='center', fontsize=20, zorder=2)
+
+    # 2. ハウスのカスプ (すべて破線)
     radius_house_num = 3.5
     for i, cusp_deg in enumerate(cusps):
         angle = np.deg2rad(apply_rotation(cusp_deg))
-        ax.plot([angle, angle], [0, radius_sign - 1], color='gray', linestyle='--', linewidth=1, zorder=5)
+        ax.plot([angle, angle], [0, radius_sign - 1],
+                color='gray',
+                linestyle='--',
+                linewidth=1, zorder=5)
+        
         next_cusp_deg = cusps[(i + 1) % 12]
         mid_angle_deg = cusp_deg + (((next_cusp_deg - cusp_deg) + 360) % 360) / 2
         mid_angle_rad = np.deg2rad(apply_rotation(mid_angle_deg))
         ax.text(mid_angle_rad, radius_house_num, str(i + 1), ha='center', va='center', fontsize=12, color='gray', zorder=6)
+    
+    # ASC/MCラベル
     ax.text(np.deg2rad(apply_rotation(ascmc[0])), radius_sign-1.2, "ASC", ha='right', va='center', fontsize=12, color='black')
     ax.text(np.deg2rad(apply_rotation(ascmc[1])), radius_sign-1.2, "MC", ha='center', va='bottom', fontsize=12, color='black')
+
+    # 3. 天体を三重円でプロット
     _plot_planets_on_circle(ax, trans, 8.0, rotation_offset)
     _plot_planets_on_circle(ax, prog, 6.2, rotation_offset)
     _plot_planets_on_circle(ax, natal, 4.4, rotation_offset)
+    
     return fig
 
 # --- Streamlit UI ---
 st.set_page_config(page_title="三重円ホロスコープ作成", page_icon="🪐", layout="wide")
 st.title("🪐 三重円ホロスコープ作成アプリ")
 st.write("ネイタル（内円）、プログレス（中円）、トランジット（外円）の三重円ホロスコープを作成します。")
-
-# ★変更点2: session_stateでトランジットの日時を管理
-# アプリの再実行をまたいで状態を保持するために使用する
-if 'transit_date' not in st.session_state:
-    st.session_state.transit_date = datetime.now(timezone(timedelta(hours=9))).date()
-if 'transit_time' not in st.session_state:
-    st.session_state.transit_time = datetime.now(timezone(timedelta(hours=9))).time().replace(second=0, microsecond=0)
 
 with st.sidebar:
     st.header("出生情報")
@@ -296,26 +311,10 @@ with st.sidebar:
     prefecture = st.selectbox("📍 出生地（都道府県）", PREFECTURE_DATA.keys(), index=12)
 
     st.header("トランジット指定")
+    use_custom_transit = st.checkbox("日時を指定する")
+    transit_date = st.date_input("📅 指定日", datetime.now(), disabled=not use_custom_transit, key="transit_date")
+    transit_time_str = st.text_input("⏰ 指定時刻 (HH:MM)", "12:00", disabled=not use_custom_transit, key="transit_time")
     
-    # ★変更点3: UIウィジェットの値をsession_stateに直接書き込む
-    st.session_state.transit_date = st.date_input("📅 指定日", st.session_state.transit_date)
-    transit_time_str = st.text_input("⏰ 指定時刻 (HH:MM)", st.session_state.transit_time.strftime('%H:%M'))
-    
-    # 入力された時刻をパースしてsession_stateに保存
-    try:
-        st.session_state.transit_time = datetime.strptime(transit_time_str, "%H:%M").time()
-    except ValueError:
-        st.warning("時刻の形式が正しくありません。（HH:MM）")
-    
-    # ★変更点4: 日時を操作するボタンを追加
-    col1, col2 = st.columns(2)
-    if col1.button("⏪ 1日戻す"):
-        st.session_state.transit_date -= timedelta(days=1)
-        st.rerun() # 画面を即座に再描画させる
-    if col2.button("1日進む ⏩"):
-        st.session_state.transit_date += timedelta(days=1)
-        st.rerun() # 画面を即座に再描画させる
-
     is_ready = st.button("ホロスコープを作成する", type="primary")
 
 if is_ready:
@@ -326,21 +325,25 @@ if is_ready:
         dt_utc = dt_local.replace(tzinfo=timezone(timedelta(hours=9))).astimezone(timezone.utc)
         lat, lon = PREFECTURE_DATA[prefecture]["lat"], PREFECTURE_DATA[prefecture]["lon"]
 
-        # ★変更点5: session_stateからトランジット日時を組み立てる
-        transit_dt_local = datetime.combine(st.session_state.transit_date, st.session_state.transit_time)
-        transit_dt_utc = transit_dt_local.replace(tzinfo=timezone(timedelta(hours=9))).astimezone(timezone.utc)
-        transit_display_str = transit_dt_local.strftime('%Y年%m月%d日 %H:%M')
+        # トランジット日時の決定
+        if use_custom_transit:
+            try:
+                transit_time = datetime.strptime(transit_time_str, "%H:%M").time()
+                transit_dt_local = datetime.combine(transit_date, transit_time)
+                transit_dt_utc = transit_dt_local.replace(tzinfo=timezone(timedelta(hours=9))).astimezone(timezone.utc)
+                transit_display_str = transit_dt_local.strftime('%Y年%m月%d日 %H:%M')
+            except ValueError:
+                st.error("トランジットの指定時刻の形式が正しくありません。「HH:MM」で入力してください。")
+                st.stop()
+        else:
+            transit_dt_utc = datetime.now(timezone.utc)
+            transit_display_str = datetime.now(timezone(timedelta(hours=9))).strftime('%Y年%m月%d日 %H:%M')
 
         st.header(f"{dt_local.strftime('%Y年%m月%d日 %H:%M')} 生まれ ({prefecture})")
         st.caption(f"プログレスは現在、トランジットは {transit_display_str} で計算")
         
         with st.spinner("ホロスコープを計算中..."):
-            # ★変更点6: 分割した関数を呼び出す
-            # ネイタル・プログレスはキャッシュされた結果を（あれば）利用する
-            natal_bodies, prog_bodies, cusps, ascmc = calculate_base_charts(dt_utc, lat, lon)
-            # トランジットは毎回計算する
-            trans_bodies = calculate_transit_chart(transit_dt_utc)
-            
+            natal_bodies, prog_bodies, trans_bodies, cusps, ascmc = calculate_all_data(dt_utc, lat, lon, transit_dt_utc)
             natal_aspects = calculate_natal_aspects(natal_bodies) if natal_bodies else []
 
         if natal_bodies and cusps:
@@ -396,24 +399,31 @@ if is_ready:
                         for aspect in sorted(natal_aspects, key=lambda x: x['orb']):
                             p1_name, p2_name = aspect['p1_name'], aspect['p2_name']
                             p1_data, p2_data = natal_bodies[p1_name], natal_bodies[p2_name]
+
+                            # 天体1の情報
                             p1_sign, _ = get_degree_parts(p1_data['pos'])
                             p1_house = get_house_number(p1_data['pos'], cusps) if p1_name not in SENSITIVE_POINTS else '-'
                             p1_retro = "R" if p1_data.get('is_retro') else ""
                             p1_display_name = f"{p1_name} {p1_retro}".strip()
                             p1_details = f"{p1_sign} {p1_house}ハウス" if p1_name not in SENSITIVE_POINTS else p1_sign
+
+                            # 天体2の情報
                             p2_sign, _ = get_degree_parts(p2_data['pos'])
                             p2_house = get_house_number(p2_data['pos'], cusps) if p2_name not in SENSITIVE_POINTS else '-'
                             p2_retro = "R" if p2_data.get('is_retro') else ""
                             p2_display_name = f"{p2_name} {p2_retro}".strip()
                             p2_details = f"{p2_sign} {p2_house}ハウス" if p2_name not in SENSITIVE_POINTS else p2_sign
+
                             aspect_name = aspect['aspect_name'].split(" ")[0]
                             orb_str = f"{aspect['orb']:.2f}°"
+
                             aspect_data.append([
                                 p1_display_name, p1_details,
                                 aspect_name,
                                 p2_display_name, p2_details,
                                 orb_str
                             ])
+                        
                         df_aspect = pd.DataFrame(
                             aspect_data,
                             columns=["天体1", "詳細1", "アスペクト", "天体2", "詳細2", "オーブ"]
@@ -421,6 +431,7 @@ if is_ready:
                         st.dataframe(df_aspect, use_container_width=True)
                     else:
                         st.info("設定されたオーブ内に主要なアスペクトは見つかりませんでした。")
+
         else:
             st.error("データの計算に失敗しました。入力時刻が高緯度などの理由でハウス分割できない可能性があります。")
     except ValueError:
